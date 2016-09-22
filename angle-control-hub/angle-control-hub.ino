@@ -4,6 +4,9 @@
 
 #include <ESP8266WiFi.h>
 #include <FirebaseArduino.h>
+#include <RCSwitch.h>
+
+RCSwitch mySwitch = RCSwitch();
 
 #include "config.h"
 
@@ -19,8 +22,6 @@ class Device {
   Device() { }
   
   void init(JsonVariant device) {
-    Serial.print("init device");
-    device.printTo(Serial);
     description = device.asObject().get<String>("description");
     type = device["type"];
     key = device["key"];
@@ -37,6 +38,13 @@ class Device {
         } else {
           Serial.println("Send OFF_CODE");
         }
+      }
+    }
+    if(event["type"] == "rf-receive") {
+      if(event["code"] == onCode) {
+        Serial.println("Receive ON_CODE");
+      } else if(event["code"] == offCode) {
+        Serial.println("Receive OFF_CODE");
       }
     }
   }
@@ -56,6 +64,7 @@ void initDevices(FirebaseObject event) {
 }
 
 void setup() {
+  mySwitch.enableReceive(13);
   Serial.begin(115200);
   delay(500);
   Serial.println("Setup Angle Control Hub...");
@@ -96,6 +105,14 @@ void loop() {
       eventInfo.asObject()["valueKey"] = path.substring(path.indexOf('/') + 1);
       updateDevices(eventInfo);
     }
+  }
+  if (mySwitch.available()) {
+    StaticJsonBuffer<200> jsonBuffer;
+    JsonObject& event = jsonBuffer.createObject();
+    event["type"] = "rf-receive";
+    event["code"] = mySwitch.getReceivedValue();
+    updateDevices(event);
+    mySwitch.resetAvailable();
   }
 }
 
