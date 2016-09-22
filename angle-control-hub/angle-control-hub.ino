@@ -8,7 +8,68 @@
 
 #include "config.h"
 
-SoftwareSerial mySerial(3,4); // pin 2 = TX, pin 3 = RX (unused)
+//SoftwareSerial mySerial(3,4); // pin 2 = TX, pin 3 = RX (unused)
+
+class Device {
+  String description;
+  const char* type;
+  const char* key;
+  bool on;
+  int onCode;
+  int offCode;
+
+  public:
+  Device() {
+    
+  }
+  void init(JsonVariant device) {
+    Serial.print("init device");
+    device.printTo(Serial);
+    description = device.asObject().get<String>("description");
+    type = device["type"];
+    key = device["key"];
+    on = device["on"];
+    onCode = device["onCode"];
+    offCode = device["offCode"];
+  }
+  void update(JsonVariant event) {
+    if(event.asObject().get<String>("key") == key) {
+      Serial.print("Updating Device: ");
+      Serial.print(key);
+      Serial.print("  Action: ");
+      if(event.asObject().get<String>("valueKey") == "on") {
+        if(event.asObject().get<bool>("data")) {
+          Serial.println("Send ON_CODE");
+        } else {
+          Serial.println("Send OFF_CODE");
+        }
+      }
+    }
+  }
+};
+
+Device devices[10];
+int deviceCount = 0;
+
+void initDevices(FirebaseObject event) {
+  JsonVariant dataArr = event.convertToArray("data");
+//  Serial.print("Initilizing Devices...");
+//  dataArr.printTo(Serial);
+//  Serial.println();
+  deviceCount = dataArr.asArray().size();
+
+  for(byte i = 0; i < deviceCount; i++) {
+//    Serial.print("Device #");
+//    Serial.print(i);
+//    Serial.print(" = ");
+//    dataArr[i].printTo(Serial);
+//    Serial.println();
+//    Serial.print("device key: ");
+    const char* deviceKey = dataArr[i]["key"];
+//    Serial.println(deviceKey);
+    devices[i].init(dataArr[i]);
+  }
+}
 
 void setup() {
   
@@ -22,55 +83,99 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting...");
   while(WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
+    Serial.print(WiFi.status());
     delay(500);
   }
   Serial.println();
   Serial.println("Connected.");
 
   Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  Firebase.stream(String("hubs/") + String(HUB_KEY) + String("/devices"));
+  while (!Firebase.available()) {
+    if (Firebase.failed()) {
+      Serial.print("Sreaming Error: ");
+      Serial.println(Firebase.error());
+    }
+  }
+  initDevices(Firebase.readEvent());
 }
 
 void loop() {
-  Serial.print("Message: ");
-  String message = Firebase.getString(String("hubs/") + String(HUB_KEY) + String("/message"));
-  Serial.println(message);
-  
-  FirebaseObject devices = Firebase.get(String("hubs/") + String(HUB_KEY) + String("/devices"));
-  DynamicJsonBuffer jsonBuffer;
-//  JsonObject& root = devices.getJsonVariant();
-  const char* type = devices.getJsonVariant()["0"]["type"];
-  Serial.print("type");
-  Serial.println(type);
-  
-  Serial.print("devices JsonVariant: ");
-  devices.getJsonVariant().printTo(Serial);
-  Serial.println();
-  Serial.print("sub JsonVariant: ");
-  devices.convertToArray().printTo(Serial);
-//  Serial.println(devices.getNodeArray());
-//  Serial.print("Test get array: ");
-  
-//  const char* testOutput = devices.getNodeArray(1)["type"];
-  if(devices.failed()) {
-    Serial.print("Error : ");
-    Serial.println(devices.error());
+  if (Firebase.failed()) {
+    Serial.print("Sreaming Error: ");
+    Serial.println(Firebase.error());
   }
-//  Serial.print(testOutput);
-//  jsonBuffer.parseObject(FirebaseObject(devices), 3);
-
-//  for(JsonObject::iterator key = devices.getJsonVariant().begin(); key != devices.getJsonVariant().end(); ++key) {
-//    Serial.print("description: ");
-//    Serial.println(devices.getJsonVariant()[*key]["description"];
+    
+  if (Firebase.available()) {
+//    Serial.println("EVENT!");
+    FirebaseObject event = Firebase.readEvent();
+    if(event.getString("type") == "put") {
+      String path = event.getString("path");
+      path = path.substring(1);
+      JsonVariant eventInfo = event.getJsonVariant();
+      eventInfo.asObject()["deviceKey"] = path.substring(0,path.indexOf('/'));
+      eventInfo.asObject()["valueKey"] = path.substring(path.indexOf('/') + 1);
+      updateDevices(eventInfo);
+    }
+    /*
+    Serial.print("UPDATE. event type: ");
+    Serial.println(event.getString("type"));
+    event.getJsonVariant().printTo(Serial);
+    Serial.println();
+    if(event.getString("type") == "put") {
+      String path = event.getString("path");
+      path = path.substring(1);
+      Serial.print("Trimed path");
+      Serial.println(path);
+      String deviceKey = path.substring(0,path.indexOf('/'));
+      Serial.print("Device Key: ");
+      Serial.println(deviceKey);
+      String valueKey = path.substring(path.indexOf('/') + 1);
+      Serial.print("Value Key: ");
+      Serial.println(valueKey);
+    }*/
+    
+  }
+  
+//  JsonVariant devices = fetchDevices();
+//  int deviceCount = devices.asArray().size();
+//
+//  Device deviceArr[deviceCount];
+//
+//  for(byte i = 0; i < deviceCount; i++) {
+//    deviceArr[i].init(devices[i]);
 //  }
-
+//  delay(2000);
+  /*
+  Firebase.stream(String("hubs/") + String(HUB_KEY) + String("/devices"));
   
-//  boolean thing = Firebase.getBool("boolean");
-  delay(3000);
+  while(1) {
+    if (Firebase.failed()) {
+      Serial.print("Sreaming Error: ");
+      Serial.println(Firebase.error());
+    }
+    if (Firebase.available()) {
+      
+      FirebaseObject event = Firebase.readEvent();
+      Serial.print("UPDATE. event type: ");
+      Serial.println(event.getString("type"));
+      for(byte i = 0; i < deviceCount; i++) {
+        deviceArr[i].update(event);
+      }
+    }
+//    delay(1000);
+  }*/
+}
+
+void updateDevices(JsonVariant eventInfo) {
+  for(byte i = 0; i < deviceCount; i++) {
+    devices[i].update(eventInfo);
+  }
+}
+
+JsonVariant fetchDevices() {
+  return Firebase.get(String("hubs/") + String(HUB_KEY) + String("/devices")).convertToArray();
 }
 
 
-void updateDevices() {
-  
-}
 
